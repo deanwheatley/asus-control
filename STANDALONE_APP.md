@@ -1,0 +1,122 @@
+# Standalone Application Setup
+
+The ASUS Fan Control application can be installed as a standalone app that can be launched from your application menu without needing the terminal.
+
+## Installation
+
+### One-Command Installation
+
+Run the installer script:
+
+```bash
+cd ~/projects/asus-control
+./install.sh
+```
+
+This will:
+1. Check system requirements (Python, python3-venv)
+2. Create virtual environment automatically
+3. Install all dependencies
+4. Create desktop entry in `~/.local/share/applications/`
+5. Make launcher script executable
+
+### What Gets Installed
+
+- **Virtual Environment**: `venv/` directory in project folder
+- **Desktop Entry**: `~/.local/share/applications/asus-control.desktop`
+- **Launcher Script**: `asus-control-launcher.sh` (handles venv activation automatically)
+
+## Launching the Application
+
+After installation, you have several ways to launch:
+
+### 1. From Application Menu (Easiest)
+- Open your application menu
+- Search for "ASUS Fan Control"
+- Click to launch
+- **No terminal needed!**
+
+### 2. Double-Click Launcher
+- Navigate to the project folder
+- Double-click `asus-control-launcher.sh`
+- The launcher handles everything automatically
+
+### 3. Command Line
+```bash
+./asus-control-launcher.sh
+```
+
+## How the Launcher Works
+
+The `asus-control-launcher.sh` script automatically:
+- ✅ Checks if virtual environment exists (creates it if needed)
+- ✅ Activates the virtual environment
+- ✅ Checks for dependencies (installs if missing)
+- ✅ Launches the application
+- ✅ Cleans up when done
+
+## Uninstallation
+
+To remove the desktop entry:
+
+```bash
+rm ~/.local/share/applications/asus-control.desktop
+```
+
+To also remove the virtual environment:
+
+```bash
+rm -r ~/projects/asus-control/venv
+```
+
+## Troubleshooting
+
+### Desktop Entry Not Appearing
+
+After running `./install.sh`, the desktop entry should appear immediately. If it doesn't:
+- Log out and log back in
+- Or restart your desktop environment
+- Or manually refresh: `update-desktop-database ~/.local/share/applications/`
+
+### Launcher Shows Errors
+
+If the launcher script encounters errors:
+1. Check that `python3-venv` is installed: `sudo apt install python3-venv`
+2. Run the installer again: `./install.sh`
+3. Or check the launcher script manually: `bash -x asus-control-launcher.sh`
+
+### Permission Denied
+
+Make sure scripts are executable:
+```bash
+chmod +x install.sh asus-control-launcher.sh
+```
+
+## Technical Details
+
+### Desktop Entry Location
+
+The desktop entry is installed to:
+```
+~/.local/share/applications/asus-control.desktop
+```
+
+This is the user-specific location, so no sudo is needed.
+
+### Launcher Script Features
+
+- **Auto-detection**: Detects if venv exists
+- **Auto-creation**: Creates venv if missing
+- **Dependency checking**: Verifies dependencies are installed
+- **Error handling**: Shows helpful error messages
+- **GUI error dialogs**: Uses `zenity` if available for user-friendly errors
+
+### Virtual Environment Location
+
+The virtual environment is created in:
+```
+~/projects/asus-control/venv/
+```
+
+This keeps everything in one place and makes it easy to manage.
+

@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""
+Fan Curve Editor Widget
+
+Interactive fan curve editor with draggable control points.
+"""
+
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QButtonGroup, QMessageBox, QSpinBox, QFormLayout, QGroupBox
+)
+from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF
+from PyQt6.QtGui import QFont, QPainter, QPen, QBrush, QColor, QMouseEvent
+import pyqtgraph as pg
+import numpy as np
+
+from ..control.asusctl_interface import FanCurve, FanCurvePoint, Profile
+
+
+class DraggablePoint(pg.ScatterPlotItem):
+    """A draggable point on the fan curve."""
+    
+    def __init__(self, x, y, parent_editor):
+        super().__init__([x], [y], 
+                        pen=pg.mkPen(color='#2196F3', width=2),
+                        brush=pg.mkBrush(color='white'),
+                        size=12,
+                        hoverable=True,
+                        hoverPen=pg.mkPen(color='#2196F3', width=3))
+        self.parent_editor = parent_editor
+        self.original_temp = x
+        self.original_speed = y
+        self.setAcceptHoverEvents(True)
+    
+    def set_selected(self, selected):
+        """Update selection state."""
+        if selected:
+            self.setBrush(pg.mkBrush(color='#2196F3'))
+            self.setPen(pg.mkPen(color='#2196F3', width=2))
+        else:
+            self.setBrush(pg.mkBrush(color='white'))
+            self.setPen(pg.mkPen(color='#2196F3', width=2))
+
+
+class FanCurveEditor(QWidget):
+    """Interactive fan curve editor widget."""
+    
+    curve_changed = pyqtSignal(FanCurve)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_curve = None
+        self.original_curve = None
+        self.control_points = []
+        self.selected_point = None
+        self.temp_range = (30, 90)  # Temperature range in Celsius
+        self.speed_range = (0, 100)  # Fan speed range in %
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Set up the UI."""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        # Title and fan selector
+        header_layout = QHBoxLayout()
+        
+        title = QLabel("Fan Curve Editor")
+        title_font = QFont()
+        title_font.setPointSize(20)
+        title_font.setWeight(QFont.Weight.DemiBold)
+        title.setFont(title_font)
+        title.setStyleSheet("color: #212121;")
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        
+        # Fan selector buttons
+        self.fan_button_group = QButtonGroup(self)
+        self.cpu_fan_btn = QPushButton("CPU Fan")
+        self.gpu_fan_btn = QPushButton("GPU Fan")
+        
+        for btn in [self.cpu_fan_btn, self.gpu_fan_btn]:
+            btn.setCheckable(True)
+            btn.setStyleSheet("""
+                QPushButton {
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    border: 1px solid #e0e0e0;
+                    background-color: white;
+                }
+                QPushButton:checked {
+                    background-color: #2196F3;
+                    color: white;
+                    border: 1px solid #2196F3;
+                }
+            """)
+            self.fan_button_group.addButton(btn)
+        
+        self.cpu_fan_btn.setChecked(True)
+        header_layout.addWidget(self.cpu_fan_btn)
+        header_layout.addWidget(self.gpu_fan_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Main content area
+        content_layout = QHBoxLayout()
+        
+        # Graph area
+        graph_container = QWidget()
+        graph_layout = QVBoxLayout(graph_container)
+        graph_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create PyQtGraph widget
+        self.graph_widget = pg.PlotWidget()
+        self.graph_widget.setBackground('white')
+        self.graph_widget.setLabel('left', 'Fan Speed (%)', **{'color': '#666', 'font-size': '11pt'})
+        self.graph_widget.setLabel('bottom', 'Temperature (°C)', **{'color': '#666', 'font-size': '11pt'})
+        self.graph_widget.setXRange(self.temp_range[0], self.temp_range[1])
+        self.graph_widget.setYRange(self.speed_range[0], self.speed_range[1])
+        self.graph_widget.showGrid(x=True, y=True, alpha=0.2)
+        self.graph_widget.getAxis('left').setPen(pg.mkPen(color='#ccc', width=1))
+        self.graph_widget.getAxis('bottom').setPen(pg.mkPen(color='#ccc', width=1))
+        
+        # Plot item for the curve
+        self.curve_plot = self.graph_widget.plot([], [], pen=pg.mkPen(color='#2196F3', width=3))
+        
+        # Scene for interactive points
+        self.plot_item = self.graph_widget.getPlotItem()
+        
+        graph_layout.addWidget(self.graph_widget)
+        graph_container.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border: 1px solid #e8e8e8;
+                border-radius: 12px;
+            }
+        """)
+        graph_layout.setContentsMargins(15, 15, 15, 15)
+        
+        content_layout.addWidget(graph_container, 2)
+        
+        # Control panel
+        control_panel = self.create_control_panel()
+        content_layout.addWidget(control_panel, 1)
+        
+        layout.addLayout(content_layout)
+        
+        # Action buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        self.preset_quiet_btn = QPushButton("Quiet Preset")
+        self.preset_balanced_btn = QPushButton("Balanced Preset")
+        self.preset_performance_btn = QPushButton("Performance Preset")
+        self.reset_btn = QPushButton("Reset")
+        self.apply_btn = QPushButton("Apply")
+        
+        for btn in [self.preset_quiet_btn, self.preset_balanced_btn, self.preset_performance_btn, self.reset_btn, self.apply_btn]:
+            btn.setStyleSheet("""
+                QPushButton {
+                    padding: 10px 20px;
+                    border-radius: 6px;
+                    font-weight: 500;
+                }
+                QPushButton:hover {
+                    opacity: 0.9;
+                }
+            """)
+        
+        self.preset_quiet_btn.setStyleSheet(self.preset_quiet_btn.styleSheet() + "background-color: #9E9E9E; color: white;")
+        self.preset_balanced_btn.setStyleSheet(self.preset_balanced_btn.styleSheet() + "background-color: #4CAF50; color: white;")
+        self.preset_performance_btn.setStyleSheet(self.preset_performance_btn.styleSheet() + "background-color: #F44336; color: white;")
+        self.reset_btn.setStyleSheet(self.reset_btn.styleSheet() + "background-color: #666; color: white;")
+        self.apply_btn.setStyleSheet(self.apply_btn.styleSheet() + "background-color: #2196F3; color: white;")
+        
+        button_layout.addWidget(self.preset_quiet_btn)
+        button_layout.addWidget(self.preset_balanced_btn)
+        button_layout.addWidget(self.preset_performance_btn)
+        button_layout.addWidget(self.reset_btn)
+        button_layout.addWidget(self.apply_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Connect signals
+        self.preset_quiet_btn.clicked.connect(lambda: self.load_preset('quiet'))
+        self.preset_balanced_btn.clicked.connect(lambda: self.load_preset('balanced'))
+        self.preset_performance_btn.clicked.connect(lambda: self.load_preset('performance'))
+        self.reset_btn.clicked.connect(self.reset_curve)
+        self.apply_btn.clicked.connect(self.apply_curve)
+        
+        # Set up initial curve
+        self.load_preset('balanced')
+        
+    def create_control_panel(self) -> QWidget:
+        """Create the control panel widget."""
+        panel = QGroupBox("Controls")
+        panel.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #e8e8e8;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        layout = QVBoxLayout(panel)
+        
+        # Add point controls
+        form_layout = QFormLayout()
+        
+        self.temp_input = QSpinBox()
+        self.temp_input.setRange(self.temp_range[0], self.temp_range[1])
+        self.temp_input.setValue(50)
+        form_layout.addRow("Temperature (°C):", self.temp_input)
+        
+        self.speed_input = QSpinBox()
+        self.speed_input.setRange(self.speed_range[0], self.speed_range[1])
+        self.speed_input.setValue(50)
+        form_layout.addRow("Fan Speed (%):", self.speed_input)
+        
+        layout.addLayout(form_layout)
+        
+        add_point_btn = QPushButton("Add Point")
+        add_point_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                padding: 8px;
+                border-radius: 6px;
+            }
+        """)
+        add_point_btn.clicked.connect(self.add_point_from_inputs)
+        layout.addWidget(add_point_btn)
+        
+        remove_point_btn = QPushButton("Remove Selected")
+        remove_point_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #F44336;
+                color: white;
+                padding: 8px;
+                border-radius: 6px;
+            }
+        """)
+        remove_point_btn.clicked.connect(self.remove_selected_point)
+        layout.addWidget(remove_point_btn)
+        
+        # Update point button
+        update_point_btn = QPushButton("Update Selected")
+        update_point_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                padding: 8px;
+                border-radius: 6px;
+            }
+        """)
+        update_point_btn.clicked.connect(self.update_point_from_inputs)
+        layout.addWidget(update_point_btn)
+        
+        layout.addStretch()
+        
+        return panel
+    
+    def update_point_from_inputs(self):
+        """Update the selected point from input fields."""
+        if self.selected_point is None:
+            QMessageBox.information(self, "No Selection", "Please select a point to update.")
+            return
+        
+        temp = self.temp_input.value()
+        speed = self.speed_input.value()
+        
+        if self.current_curve:
+            try:
+                # Get old point
+                old_point = self.current_curve.points[self.selected_point]
+                
+                # Remove old point
+                self.current_curve.remove_point(old_point.temperature)
+                
+                # Add new point
+                self.current_curve.add_point(temp, speed)
+                
+                self.selected_point = None
+                self.update_display()
+            except (IndexError, ValueError) as e:
+                QMessageBox.warning(self, "Invalid Curve", str(e))
+    
+    def load_curve(self, curve: FanCurve):
+        """Load a fan curve into the editor."""
+        self.original_curve = curve
+        self.current_curve = FanCurve([FanCurvePoint(p.temperature, p.fan_speed) for p in curve.points])
+        self.update_display()
+    
+    def load_preset(self, preset_name: str):
+        """Load a preset curve."""
+        from ..control.asusctl_interface import get_preset_curve
+        preset = get_preset_curve(preset_name)
+        self.load_curve(preset)
+    
+    def update_display(self):
+        """Update the graph display."""
+        if not self.current_curve or not self.current_curve.points:
+            return
+        
+        # Clear existing points
+        for item in self.control_points:
+            if isinstance(item, tuple) and len(item) >= 2:
+                scatter = item[0]
+                self.plot_item.removeItem(scatter)
+        self.control_points.clear()
+        self.selected_point = None
+        
+        # Plot the curve
+        temps = [p.temperature for p in self.current_curve.points]
+        speeds = [p.fan_speed for p in self.current_curve.points]
+        
+        # Create smooth curve for display
+        if len(temps) >= 2:
+            smooth_temps = np.linspace(min(temps), max(temps), 200)
+            smooth_speeds = [self.current_curve.get_fan_speed_at_temp(int(t)) for t in smooth_temps]
+            self.curve_plot.setData(smooth_temps, smooth_speeds)
+        else:
+            self.curve_plot.setData(temps, speeds)
+        
+        # Add control points using scatter plot
+        for i, point in enumerate(self.current_curve.points):
+            scatter = pg.ScatterPlotItem(
+                [point.temperature], [point.fan_speed],
+                pen=pg.mkPen(color='#2196F3', width=2),
+                brush=pg.mkBrush(color='white'),
+                size=12,
+                symbol='o',
+                hoverable=True,
+                hoverPen=pg.mkPen(color='#2196F3', width=3)
+            )
+            # Create a closure to capture the index correctly
+            def make_click_handler(idx):
+                def handler(item, points, ev):
+                    self.on_point_clicked(idx)
+                return handler
+            
+            scatter.sigClicked.connect(make_click_handler(i))
+            self.plot_item.addItem(scatter)
+            self.control_points.append((scatter, point, i))
+    
+    def on_point_clicked(self, index):
+        """Handle point click."""
+        if self.control_points and index < len(self.control_points):
+            scatter, point, idx = self.control_points[index]
+            self.temp_input.setValue(point.temperature)
+            self.speed_input.setValue(point.fan_speed)
+            self.selected_point = idx
+    
+    def add_point_from_inputs(self):
+        """Add or update a point from the input fields."""
+        temp = self.temp_input.value()
+        speed = self.speed_input.value()
+        
+        if self.current_curve:
+            try:
+                # If a point is selected and has the same temperature, update it
+                if self.selected_point is not None:
+                    old_point = self.current_curve.points[self.selected_point]
+                    if old_point.temperature == temp:
+                        # Update existing point
+                        self.current_curve.remove_point(temp)
+                        self.current_curve.add_point(temp, speed)
+                        self.selected_point = None
+                    else:
+                        # Different temperature, add as new point
+                        self.current_curve.add_point(temp, speed)
+                        self.selected_point = None
+                else:
+                    # Add new point
+                    self.current_curve.add_point(temp, speed)
+                
+                self.update_display()
+            except ValueError as e:
+                QMessageBox.warning(self, "Invalid Curve", str(e))
+    
+    def remove_selected_point(self):
+        """Remove the selected point."""
+        if self.selected_point is not None and self.current_curve:
+            try:
+                # Get the point to remove
+                point_to_remove = self.current_curve.points[self.selected_point]
+                self.current_curve.remove_point(point_to_remove.temperature)
+                self.selected_point = None
+                self.update_display()
+            except (IndexError, ValueError) as e:
+                QMessageBox.warning(self, "Cannot Remove Point", str(e))
+        else:
+            QMessageBox.information(self, "No Selection", "Please select a point to remove.")
+    
+    def reset_curve(self):
+        """Reset to original curve."""
+        if self.original_curve:
+            self.load_curve(self.original_curve)
+    
+    def apply_curve(self):
+        """Apply the current curve."""
+        if self.current_curve:
+            self.curve_changed.emit(self.current_curve)
+            QMessageBox.information(self, "Applied", "Fan curve has been applied!")
+

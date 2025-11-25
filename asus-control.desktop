@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ASUS Fan Control
+Comment=Modern GUI for ASUS laptop fan curve configuration with system monitoring
+Exec=/home/dean/projects/asus-control/asus-control-launcher.sh
+Icon=applications-system
+Terminal=false
+Categories=System;Settings;HardwareSettings;
+StartupNotify=true
+Keywords=asus;fan;temperature;cooling;laptop;control;
+
