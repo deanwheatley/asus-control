@@ -183,6 +183,19 @@ class ProfileManagerTab(QWidget):
         actions_group.setStyleSheet(list_group.styleSheet())
         actions_layout = QVBoxLayout(actions_group)
         
+        self.new_profile_btn = QPushButton("Create New Profile from Scratch")
+        self.new_profile_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                padding: 12px;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+        """)
+        self.new_profile_btn.clicked.connect(self.create_new_profile)
+        actions_layout.addWidget(self.new_profile_btn)
+        
         self.save_btn = QPushButton("Save Current Curves")
         self.save_btn.setStyleSheet("""
             QPushButton {
@@ -243,6 +256,56 @@ class ProfileManagerTab(QWidget):
                 item.setToolTip(profile.description)
             self.profile_list.addItem(item)
     
+    def create_new_profile(self):
+        """Create a new profile from scratch with default curves."""
+        dialog = ProfileDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            name = dialog.get_name()
+            if not name:
+                QMessageBox.warning(self, "Invalid Name", "Profile name cannot be empty.")
+                return
+            
+            if name in self.profile_manager.list_profiles():
+                reply = QMessageBox.question(
+                    self,
+                    "Overwrite?",
+                    f"Profile '{name}' already exists. Overwrite?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            
+            # Create default balanced curves
+            from ..control.asusctl_interface import get_preset_curve
+            default_cpu_curve = get_preset_curve('balanced')
+            default_gpu_curve = get_preset_curve('balanced')
+            
+            profile = SavedProfile(
+                name=name,
+                description=dialog.get_description(),
+                cpu_fan_curve=default_cpu_curve,
+                gpu_fan_curve=default_gpu_curve
+            )
+            
+            if self.profile_manager.save_profile(profile):
+                QMessageBox.information(
+                    self,
+                    "Created",
+                    f"Profile '{name}' created with default balanced curves!\n\n"
+                    "Switch to the Fan Curves tab to customize the curves, "
+                    "then come back to save your changes."
+                )
+                self.refresh_profile_list()
+                # Load the new profile so user can edit it
+                self.load_profile_for_editing(name, default_cpu_curve, default_gpu_curve)
+            else:
+                QMessageBox.warning(self, "Error", "Failed to create profile.")
+    
+    def load_profile_for_editing(self, profile_name: str, cpu_curve, gpu_curve):
+        """Load a profile for editing in the fan curve editor."""
+        self.set_current_curves(cpu_curve, gpu_curve)
+        self.profile_selected.emit(profile_name)
+    
     def save_current_curves(self):
         """Save the current fan curves as a new profile."""
         if not self.current_cpu_curve and not self.current_gpu_curve:
@@ -294,6 +357,7 @@ class ProfileManagerTab(QWidget):
         profile = self.profile_manager.get_profile(profile_name)
         
         if profile:
+            self.set_current_curves(profile.cpu_fan_curve, profile.gpu_fan_curve)
             self.profile_selected.emit(profile_name)
             QMessageBox.information(
                 self,

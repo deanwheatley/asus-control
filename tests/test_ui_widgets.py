@@ -73,3 +73,4 @@ class TestGraphWidget:
         # Graph should be updated (no exception means success)
         assert True
 
+

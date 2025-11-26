@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ASUS Fan Control")
+        self.setWindowTitle("Daemon Breathalyzer")
         self.setGeometry(100, 100, 1200, 800)
         
         # Modern window styling
@@ -91,10 +91,12 @@ class MainWindow(QMainWindow):
         self.fan_curve_tab = self._create_fan_curve_tab()
         self.tabs.addTab(self.fan_curve_tab, "Fan Curves")
         
-        # Create profile manager tab
+        # Profile manager (no separate tab - profiles accessed via dropdown in fan curve editor)
         self.profile_manager = ProfileManager()
-        self.profile_tab = self._create_profile_tab()
-        self.tabs.addTab(self.profile_tab, "Profiles")
+        
+        # Create log viewer tab
+        self.log_viewer_tab = self._create_log_viewer_tab()
+        self.tabs.addTab(self.log_viewer_tab, "System Logs")
         
         # Create placeholder tabs
         self.tabs.addTab(QWidget(), "Settings")
@@ -179,11 +181,11 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QMessageBox
         QMessageBox.about(
             self,
-            "About ASUS Fan Control",
-            "<h2>ASUS Fan Control</h2>"
+            "About Daemon Breathalyzer",
+            "<h2>Daemon Breathalyzer</h2>"
             "<p>Version 0.1.0</p>"
             "<p>A modern GUI application for managing ASUS laptop fan curves "
-            "with real-time system monitoring.</p>"
+            "with real-time system monitoring and log analysis.</p>"
             "<p>© 2024</p>"
             "<p>Press <b>F1</b> for help documentation</p>"
         )
@@ -309,45 +311,13 @@ class MainWindow(QMainWindow):
         
         if success:
             self.statusBar().showMessage(f"Fan curve applied for {fan_name}", 3000)
-            # Update profile tab with current curves
-            if hasattr(self, 'profile_tab') and hasattr(self, 'fan_curve_editor'):
-                self.profile_tab.set_current_curves(
-                    self.fan_curve_editor.current_curve,
-                    None  # GPU curve if available
-                )
         else:
             QMessageBox.warning(self, "Error", f"Failed to apply fan curve:\n{message}")
     
-    def _create_profile_tab(self) -> QWidget:
-        """Create the profile manager tab."""
-        from .profile_manager_tab import ProfileManagerTab
-        
-        profile_tab = ProfileManagerTab(self)
-        
-        # Connect profile selection to fan curve editor
-        profile_tab.profile_selected.connect(self._on_profile_selected)
-        
-        return profile_tab
-    
-    def _on_profile_selected(self, profile_name: str):
-        """Handle profile selection - load into fan curve editor."""
-        profile = self.profile_manager.get_profile(profile_name)
-        if not profile:
-            return
-        
-        # Switch to fan curve tab
-        self.tabs.setCurrentIndex(1)  # Fan Curves tab
-        
-        # Load CPU curve if available
-        if profile.cpu_fan_curve and hasattr(self, 'fan_curve_editor'):
-            self.fan_curve_editor.load_curve(profile.cpu_fan_curve)
-            
-            # Update profile tab with current curves
-            if hasattr(self, 'profile_tab'):
-                self.profile_tab.set_current_curves(
-                    profile.cpu_fan_curve,
-                    profile.gpu_fan_curve
-                )
+    def _create_log_viewer_tab(self) -> QWidget:
+        """Create the log viewer tab."""
+        from .log_viewer_tab import LogViewerTab
+        return LogViewerTab(self)
     
     def update_dashboard(self):
         """Update all dashboard widgets with latest metrics."""

@@ -18,7 +18,7 @@ numpy>=1.24.0
 pyyaml>=6.0
 
 # Utilities
-python-systemd>=234
+# python-systemd removed - not currently used and version conflict
 
 # Testing
 pytest>=7.4.0

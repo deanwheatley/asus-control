@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Launch script for ASUS Fan Control UI
+Launch script for Daemon Breathalyzer
 
 This script ensures the project root is in the Python path
 so imports work correctly regardless of where it's run from.

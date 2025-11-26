@@ -9,6 +9,7 @@ import tempfile
 import shutil
 
 from src.monitoring.system_monitor import SystemMonitor
+from src.monitoring.log_monitor import LogMonitor, LogEntry, LogPriority
 from src.control.profile_manager import ProfileManager, SavedProfile
 from src.control.asusctl_interface import FanCurve, get_preset_curve
 from src.utils.dependency_checker import DependencyChecker
@@ -119,4 +120,191 @@ class TestFanCurveWorkflow:
         loaded = manager.load_profile("Modified Balanced")
         assert loaded.cpu_fan_curve is not None
         assert any(p.temperature == 55 for p in loaded.cpu_fan_curve.points)
+
+
+@pytest.mark.integration
+class TestLogMonitoringIntegration:
+    """Integration tests for log monitoring."""
+    
+    @patch('subprocess.run')
+    def test_log_monitor_full_workflow(self, mock_run):
+        """Test complete log monitoring workflow."""
+        import json
+        
+        # Mock journalctl responses
+        def mock_journalctl(*args, **kwargs):
+            result = Mock()
+            result.returncode = 0
+            if '--since' in args[0]:
+                # For fetching new logs
+                result.stdout = ""
+            else:
+                # For initial load
+                entries = [
+                    {
+                        '__REALTIME_TIMESTAMP': '1703520000000000',
+                        'PRIORITY': '3',
+                        'MESSAGE': 'Error message',
+                        '_SYSTEMD_UNIT': 'test.service'
+                    },
+                    {
+                        '__REALTIME_TIMESTAMP': '1703520001000000',
+                        'PRIORITY': '6',
+                        'MESSAGE': 'Info message',
+                        '_SYSTEMD_UNIT': 'test.service'
+                    }
+                ]
+                result.stdout = '\n'.join(json.dumps(e) for e in entries) + '\n'
+            return result
+        
+        mock_run.side_effect = mock_journalctl
+        
+        monitor = LogMonitor(update_interval=0.1, max_entries=100)
+        
+        # Load initial logs
+        monitor._load_initial_logs()
+        
+        assert len(monitor.entries) == 2
+        
+        # Test filtering
+        monitor.set_priority_filter([LogPriority.ERR])
+        monitor._apply_filters()
+        
+        filtered = monitor.get_filtered_entries()
+        assert len(filtered) == 1
+        assert filtered[0].priority == LogPriority.ERR
+        
+        # Test error tracking
+        summary = monitor.get_error_summary()
+        assert 'total_errors' in summary
+        assert summary['total_errors'] >= 0
+    
+    @patch('subprocess.run')
+    def test_log_filtering_workflow(self, mock_run):
+        """Test complete log filtering workflow."""
+        import json
+        from datetime import datetime, timedelta
+        
+        # Create mock entries with different priorities and sources
+        now = datetime.now()
+        entries_data = [
+            {
+                '__REALTIME_TIMESTAMP': str(int((now - timedelta(minutes=30)).timestamp() * 1000000)),
+                'PRIORITY': '3',
+                'MESSAGE': 'Database connection error',
+                '_SYSTEMD_UNIT': 'database.service'
+            },
+            {
+                '__REALTIME_TIMESTAMP': str(int((now - timedelta(minutes=20)).timestamp() * 1000000)),
+                'PRIORITY': '4',
+                'MESSAGE': 'High memory usage warning',
+                '_SYSTEMD_UNIT': 'system.service'
+            },
+            {
+                '__REALTIME_TIMESTAMP': str(int((now - timedelta(minutes=10)).timestamp() * 1000000)),
+                'PRIORITY': '6',
+                'MESSAGE': 'Service started successfully',
+                '_SYSTEMD_UNIT': 'app.service'
+            }
+        ]
+        
+        def mock_journalctl(*args, **kwargs):
+            result = Mock()
+            result.returncode = 0
+            result.stdout = '\n'.join(json.dumps(e) for e in entries_data) + '\n'
+            return result
+        
+        mock_run.side_effect = mock_journalctl
+        
+        monitor = LogMonitor(update_interval=0.1, max_entries=100)
+        monitor._load_initial_logs()
+        
+        assert len(monitor.entries) == 3
+        
+        # Test priority filtering
+        monitor.set_priority_filter([LogPriority.ERR])
+        monitor._apply_filters()
+        filtered = monitor.get_filtered_entries()
+        assert len(filtered) == 1
+        assert filtered[0].message == 'Database connection error'
+        
+        # Test source filtering
+        monitor.clear_filters()
+        monitor.set_source_filter(['database'])
+        monitor._apply_filters()
+        filtered = monitor.get_filtered_entries()
+        assert len(filtered) == 1
+        assert filtered[0].source == 'database'
+        
+        # Test text filtering
+        monitor.clear_filters()
+        monitor.set_text_filter('database')
+        monitor._apply_filters()
+        filtered = monitor.get_filtered_entries()
+        assert len(filtered) == 1
+        assert 'database' in filtered[0].message.lower()
+        
+        # Test time range filtering
+        monitor.clear_filters()
+        start = now - timedelta(minutes=15)
+        monitor.set_time_range_filter(start, None)
+        monitor._apply_filters()
+        filtered = monitor.get_filtered_entries()
+        assert len(filtered) == 1  # Only the most recent entry
+    
+    @patch('subprocess.run')
+    def test_log_error_tracking(self, mock_run):
+        """Test error tracking and statistics."""
+        import json
+        
+        entries_data = [
+            {
+                '__REALTIME_TIMESTAMP': '1703520000000000',
+                'PRIORITY': '2',  # Critical
+                'MESSAGE': 'Critical system failure',
+                '_SYSTEMD_UNIT': 'system.service'
+            },
+            {
+                '__REALTIME_TIMESTAMP': '1703520001000000',
+                'PRIORITY': '3',  # Error
+                'MESSAGE': 'Application error',
+                '_SYSTEMD_UNIT': 'app.service'
+            },
+            {
+                '__REALTIME_TIMESTAMP': '1703520002000000',
+                'PRIORITY': '4',  # Warning
+                'MESSAGE': 'Warning message',
+                '_SYSTEMD_UNIT': 'app.service'
+            },
+            {
+                '__REALTIME_TIMESTAMP': '1703520003000000',
+                'PRIORITY': '3',  # Another error
+                'MESSAGE': 'Another error',
+                '_SYSTEMD_UNIT': 'service.service'
+            }
+        ]
+        
+        def mock_journalctl(*args, **kwargs):
+            result = Mock()
+            result.returncode = 0
+            result.stdout = '\n'.join(json.dumps(e) for e in entries_data) + '\n'
+            return result
+        
+        mock_run.side_effect = mock_journalctl
+        
+        monitor = LogMonitor(update_interval=0.1, max_entries=100)
+        monitor._load_initial_logs()
+        
+        # Check error counts
+        summary = monitor.get_error_summary()
+        assert summary['critical'] == 1
+        assert summary['errors'] == 2
+        assert summary['warnings'] == 1
+        assert summary['total_errors'] == 3
+        
+        # Check available sources
+        sources = monitor.get_available_sources()
+        assert 'system' in sources
+        assert 'app' in sources
+        assert 'service' in sources
 

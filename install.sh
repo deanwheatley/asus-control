@@ -1,6 +1,7 @@
 #!/bin/bash
-# ASUS Fan Control Installer
+# Daemon Breathalyzer Installer
 # Sets up the application and creates desktop entry
+# Automatically installs all required system dependencies
 
 set -e
 
@@ -8,7 +9,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
 echo "=========================================="
-echo "ASUS Fan Control - Installation"
+echo "Daemon Breathalyzer - Installation"
 echo "see https://github.com/deanwheatley/asus-control"
 echo "contact deanwheatley@hotmail.com for support"
 echo "=========================================="
@@ -152,6 +153,56 @@ pip install -q -r requirements.txt
 echo "✅ Dependencies installed"
 echo ""
 
+# Check and install Qt/XCB system dependencies
+echo "🔍 Checking Qt6 system dependencies..."
+MISSING_PACKAGES=()
+
+# Required Qt6 XCB libraries
+QT_PACKAGES=(
+    "libxcb-cursor0"
+    "libxcb-xinerama0"
+    "libxcb-xinput0"
+    "libxcb-icccm4"
+    "libxcb-image0"
+    "libxcb-keysyms1"
+    "libxcb-randr0"
+    "libxcb-render0"
+    "libxcb-render-util0"
+    "libxcb-shape0"
+    "libxcb-sync1"
+    "libxcb-xfixes0"
+    "libxcb-xkb1"
+    "libegl1"
+    "libgl1"
+    "libxkbcommon-x11-0"
+)
+
+# Check which packages are missing
+for package in "${QT_PACKAGES[@]}"; do
+    if ! dpkg -l | grep -q "^ii.*${package}"; then
+        MISSING_PACKAGES+=("$package")
+    fi
+done
+
+# Install missing packages
+if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+    echo "📦 Installing missing Qt6 dependencies..."
+    echo "   Packages to install: ${MISSING_PACKAGES[*]}"
+    
+    if sudo apt install -y "${MISSING_PACKAGES[@]}"; then
+        echo "✅ All Qt6 dependencies installed successfully"
+    else
+        echo "⚠️  Warning: Failed to install some Qt6 dependencies."
+        echo "   Missing packages: ${MISSING_PACKAGES[*]}"
+        echo "   You may need to install them manually:"
+        echo "   sudo apt install ${MISSING_PACKAGES[*]}"
+    fi
+    echo ""
+else
+    echo "✅ All Qt6 system dependencies are already installed"
+    echo ""
+fi
+
 # Make launcher executable
 chmod +x asus-control-launcher.sh
 
@@ -166,7 +217,7 @@ cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=ASUS Fan Control
+Name=Daemon Breathalyzer
 Comment=Modern GUI for ASUS laptop fan curve configuration with system monitoring
 Exec=$SCRIPT_DIR/asus-control-launcher.sh
 Path=$SCRIPT_DIR
@@ -183,15 +234,22 @@ echo "=========================================="
 echo "✅ Installation Complete!"
 echo "=========================================="
 echo ""
+echo "All dependencies have been installed:"
+echo "  ✅ Python virtual environment"
+echo "  ✅ Python packages (PyQt6, PyQtGraph, etc.)"
+echo "  ✅ Qt6 system libraries (XCB, OpenGL, etc.)"
+echo ""
 echo "The application has been installed and added to your application menu."
 echo ""
 echo "You can now:"
-echo "  1. Launch it from your application menu (search for 'ASUS Fan Control')"
+echo "  1. Launch it from your application menu (search for 'Daemon Breathalyzer')"
 echo "  2. Or run it directly: ./asus-control-launcher.sh"
 echo "  3. Or run it from terminal: source venv/bin/activate && python3 run.py"
 echo ""
 echo "To uninstall, remove:"
 echo "  - $DESKTOP_FILE"
 echo "  - $SCRIPT_DIR/venv (optional)"
+echo ""
+echo "Note: System packages (Qt6 libraries) remain installed for other applications."
 echo ""
 

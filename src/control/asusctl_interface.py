@@ -395,6 +395,64 @@ class AsusctlInterface:
             pass
         
         return None
+    
+    def test_fan(self, fan_name: str, duration: int = 5) -> Tuple[bool, str]:
+        """
+        Test fan by setting it to 100% for a specified duration.
+        
+        Args:
+            fan_name: Name of the fan (e.g., 'CPU', 'GPU')
+            duration: Duration in seconds (default: 5)
+        
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            # Create a temporary max speed curve
+            max_curve = FanCurve([
+                FanCurvePoint(30, 100),
+                FanCurvePoint(50, 100),
+                FanCurvePoint(70, 100),
+                FanCurvePoint(85, 100),
+            ])
+            
+            # Get current profile
+            current_profile = self.get_current_profile() or Profile.BALANCED
+            
+            # Save original curve if possible (store it temporarily)
+            original_curves = self.get_fan_curves(current_profile)
+            original_curve = original_curves.get(fan_name)
+            
+            # Set fan to 100% using a temporary curve
+            curve_data = max_curve.to_asusctl_format()
+            profile_map = {
+                Profile.BALANCED: 'Balanced',
+                Profile.QUIET: 'Quiet',
+                Profile.PERFORMANCE: 'Performance'
+            }
+            
+            # Apply max curve
+            result = subprocess.run(
+                [
+                    'asusctl', 'fan-curve',
+                    '--mod-profile', profile_map[current_profile],
+                    '--fan', fan_name,
+                    '--data', curve_data
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode != 0:
+                return False, f"Failed to set fan to 100%: {result.stderr or result.stdout}"
+            
+            # Note: The actual duration wait and restore would need to be handled
+            # by the calling code using threading/timers since this is synchronous
+            return True, f"Fan {fan_name} set to 100% for testing"
+            
+        except Exception as e:
+            return False, str(e)
 
 
 # Preset fan curves
@@ -403,9 +461,11 @@ def get_preset_curve(name: str) -> FanCurve:
     Get a preset fan curve.
     
     Available presets:
-    - 'quiet': Low fan speeds, quiet operation
+    - 'quiet' / 'silent': Low fan speeds, quiet operation
     - 'balanced': Balanced cooling and noise
     - 'performance': Aggressive cooling, higher fan speeds
+    - 'conservative': Fan at 100% at 60% utilization (54°C equivalent)
+    - 'max': Maximum fan speed at all times
     """
     presets = {
         'quiet': FanCurve([
@@ -413,6 +473,12 @@ def get_preset_curve(name: str) -> FanCurve:
             FanCurvePoint(50, 30),
             FanCurvePoint(70, 50),
             FanCurvePoint(85, 70),
+        ]),
+        'silent': FanCurve([
+            FanCurvePoint(30, 15),
+            FanCurvePoint(50, 25),
+            FanCurvePoint(70, 45),
+            FanCurvePoint(85, 65),
         ]),
         'balanced': FanCurve([
             FanCurvePoint(30, 30),
@@ -426,7 +492,20 @@ def get_preset_curve(name: str) -> FanCurve:
             FanCurvePoint(70, 80),
             FanCurvePoint(85, 100),
         ]),
+        'conservative': FanCurve([
+            FanCurvePoint(30, 30),
+            FanCurvePoint(50, 60),
+            FanCurvePoint(54, 100),  # 100% at ~60% utilization (54°C)
+            FanCurvePoint(85, 100),
+        ]),
+        'max': FanCurve([
+            FanCurvePoint(30, 100),
+            FanCurvePoint(50, 100),
+            FanCurvePoint(70, 100),
+            FanCurvePoint(85, 100),
+        ]),
     }
     
     return presets.get(name.lower(), presets['balanced'])
+
 

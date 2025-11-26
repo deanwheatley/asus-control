@@ -1,6 +1,6 @@
-# ASUS Fan Control UI
+# Daemon Breathalyzer
 
-A modern, minimalist GUI application for Linux Mint that allows easy fan curve configuration with live system monitoring (CPU, Memory, GPU load).
+A modern, minimalist GUI application for Linux Mint that allows easy fan curve configuration with live system monitoring, log analysis, and error tracking.
 
 ## ✨ Features
 
@@ -9,6 +9,8 @@ A modern, minimalist GUI application for Linux Mint that allows easy fan curve c
 - **📈 Real-time Graphs**: Historical data visualization with beautiful charts
 - **🌡️ Fan Curve Editor**: Interactive graph-based fan curve configuration with presets
 - **⚙️ asusctl Integration**: Seamless integration with ASUS laptop control
+- **📋 System Log Monitoring**: Real-time log viewing with journalctl integration, filtering, search, and error tracking
+- **🎯 Error Tracking**: Automatic error detection and summary statistics with color-coded priority levels
 - **🎨 Modern Minimalist UI**: Clean, informative, and simple to use
 - **📦 Preset Curves**: Quick apply Quiet, Balanced, or Performance fan curves
 - **🚀 Standalone Application**: Install once, launch from application menu - no terminal needed!

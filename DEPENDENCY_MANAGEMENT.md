@@ -149,3 +149,4 @@ The `DependencyChecker` class:
 - [ ] System package manager integration (apt, pacman, etc.)
 - [ ] Dependency conflict detection
 
+

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-ASUS Fan Control UI - Main Entry Point
+Daemon Breathalyzer - Main Entry Point
 
-PyQt6-based GUI application for ASUS fan control with system monitoring.
+PyQt6-based GUI application for ASUS fan control with system monitoring and log analysis.
 """
 
 import sys
@@ -70,7 +70,8 @@ def check_dependencies_before_startup():
         app = QApplication(sys.argv)
         app.setApplicationName("ASUS Fan Control")
         app.setOrganizationName("ASUS Control")
-        app.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+        # High DPI scaling is enabled by default in PyQt6
+    # AA_EnableHighDpiScaling was removed in PyQt6
         
         dialog = DependencyDialog()
         dialog.exec()
@@ -110,11 +111,12 @@ def main():
     
     # Create QApplication
     app = QApplication(sys.argv)
-    app.setApplicationName("ASUS Fan Control")
-    app.setOrganizationName("ASUS Control")
+    app.setApplicationName("Daemon Breathalyzer")
+    app.setOrganizationName("Daemon Breathalyzer")
     
     # Enable high DPI scaling
-    app.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+    # High DPI scaling is enabled by default in PyQt6
+    # AA_EnableHighDpiScaling was removed in PyQt6
     
     # Apply modern, minimalist styling
     app.setStyleSheet("""

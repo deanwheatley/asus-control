@@ -18,7 +18,7 @@ class HelpDialog(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Help - ASUS Fan Control")
+        self.setWindowTitle("Help - Daemon Breathalyzer")
         self.setMinimumSize(900, 700)
         
         self.setup_ui()
@@ -114,10 +114,10 @@ class HelpDialog(QDialog):
     def _create_getting_started_tab(self) -> QWidget:
         """Create getting started help content."""
         content = """
-        <h2>Welcome to ASUS Fan Control</h2>
+        <h2>Welcome to Daemon Breathalyzer</h2>
         
         <h3>📋 What is This Application?</h3>
-        <p>ASUS Fan Control is a modern GUI application that helps you:</p>
+        <p>Daemon Breathalyzer is a modern GUI application that helps you:</p>
         <ul>
             <li>Monitor your system's CPU, GPU, memory, and temperatures in real-time</li>
             <li>Configure custom fan curves for your ASUS laptop</li>
@@ -489,3 +489,4 @@ class HelpDialog(QDialog):
         """
         return self._create_scrollable_content(content)
     
+

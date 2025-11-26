@@ -284,3 +284,4 @@ Tests are designed for CI/CD:
 - Add performance benchmarks
 - Add UI interaction tests (with pytest-qt)
 
+

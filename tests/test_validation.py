@@ -75,3 +75,4 @@ class TestFanCurveValidation:
         # Test above last point
         assert curve.get_fan_speed_at_temp(90) == 80
 
+

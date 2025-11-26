@@ -1,6 +1,6 @@
 # Test Suite
 
-Comprehensive test suite for the ASUS Fan Control application.
+Comprehensive test suite for the Daemon Breathalyzer application.
 
 ## Running Tests
 
@@ -72,6 +72,8 @@ tests/
 ├── __init__.py
 ├── conftest.py              # Shared fixtures and configuration
 ├── test_system_monitor.py   # System monitoring tests
+├── test_log_monitor.py      # Log monitoring tests
+├── test_log_viewer_tab.py   # Log viewer UI tests
 ├── test_dependency_checker.py  # Dependency checker tests
 ├── test_system_check.py     # System check utility tests
 ├── test_asusctl_interface.py  # asusctl interface tests
@@ -84,6 +86,9 @@ tests/
 The test suite covers:
 
 - ✅ System monitoring functionality
+- ✅ Log monitoring with journalctl integration
+- ✅ Log viewer UI components
+- ✅ Log filtering and error tracking
 - ✅ Dependency checking and installation
 - ✅ System configuration checks
 - ✅ asusctl interface (with mocks)
@@ -146,4 +151,5 @@ Tests are designed to run in CI environments:
 - UI tests require Qt and may be slower
 - Some tests require mocking external commands
 - Hardware-specific features are mocked
+
 

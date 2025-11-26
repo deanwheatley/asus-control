@@ -53,3 +53,4 @@ def mock_asusctl_profile_output(profile="Balanced"):
         return mock_result
     return _mock_run
 
+

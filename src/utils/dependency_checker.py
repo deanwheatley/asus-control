@@ -331,3 +331,4 @@ if __name__ == '__main__':
         if info['status'] != 'not_installed':
             print(f"  ✅ {info['name']}")
 
+

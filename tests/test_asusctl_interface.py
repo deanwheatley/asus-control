@@ -343,3 +343,4 @@ class TestAsusctlInterface:
         assert success == True
         assert "enabled" in message.lower()
 
+

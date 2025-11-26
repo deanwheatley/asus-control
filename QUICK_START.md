@@ -114,3 +114,4 @@ src/
     └── dashboard_widgets.py # Reusable UI components
 ```
 
+

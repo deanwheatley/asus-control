@@ -1,4 +1,5 @@
 """
-Test suite for ASUS Fan Control application.
+Test suite for Daemon Breathalyzer application.
 """
+
 

@@ -1,8 +1,8 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=ASUS Fan Control
-Comment=Modern GUI for ASUS laptop fan curve configuration with system monitoring
+Name=Daemon Breathalyzer
+Comment=Modern GUI for ASUS laptop fan curve configuration with system monitoring and log analysis
 Exec=/home/dean/projects/asus-control/asus-control-launcher.sh
 Icon=applications-system
 Terminal=false

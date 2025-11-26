@@ -7,14 +7,17 @@ Interactive fan curve editor with draggable control points.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QButtonGroup, QMessageBox, QSpinBox, QFormLayout, QGroupBox
+    QButtonGroup, QMessageBox, QSpinBox, QFormLayout, QGroupBox,
+    QComboBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF
+from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF, QTimer
 from PyQt6.QtGui import QFont, QPainter, QPen, QBrush, QColor, QMouseEvent
 import pyqtgraph as pg
 import numpy as np
 
-from ..control.asusctl_interface import FanCurve, FanCurvePoint, Profile
+from ..control.asusctl_interface import FanCurve, FanCurvePoint, Profile, AsusctlInterface
+from ..control.profile_manager import ProfileManager, SavedProfile
+from ..control.profile_manager import ProfileManager, SavedProfile
 
 
 class DraggablePoint(pg.ScatterPlotItem):
@@ -52,11 +55,18 @@ class FanCurveEditor(QWidget):
         self.current_curve = None
         self.original_curve = None
         self.control_points = []
-        self.selected_point = None
+        self.selected_point_temp = None  # Track by temperature, not index
         self.temp_range = (30, 90)  # Temperature range in Celsius
         self.speed_range = (0, 100)  # Fan speed range in %
+        self.asusctl = AsusctlInterface()
+        self.profile_manager = ProfileManager()
+        self.test_restore_timer = None
+        self.test_countdown_timer = None
+        self.test_seconds_remaining = 0
+        self.original_curve_before_test = None
         
         self.setup_ui()
+        self.refresh_profile_dropdown()
         
     def setup_ui(self):
         """Set up the UI."""
@@ -75,6 +85,34 @@ class FanCurveEditor(QWidget):
         title.setStyleSheet("color: #212121;")
         header_layout.addWidget(title)
         header_layout.addStretch()
+        
+        # Saved profiles dropdown
+        profile_label = QLabel("Saved Profile:")
+        profile_label.setStyleSheet("color: #666; margin-right: 8px;")
+        header_layout.addWidget(profile_label)
+        
+        self.profile_dropdown = QComboBox()
+        self.profile_dropdown.setMinimumWidth(180)
+        self.profile_dropdown.setStyleSheet("""
+            QComboBox {
+                padding: 6px 12px;
+                border-radius: 6px;
+                border: 1px solid #e0e0e0;
+                background-color: white;
+            }
+            QComboBox:hover {
+                border: 1px solid #2196F3;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+        """)
+        self.profile_dropdown.addItem("-- Select Profile --")
+        self.profile_dropdown.currentTextChanged.connect(self.on_profile_dropdown_changed)
+        header_layout.addWidget(self.profile_dropdown)
+        
+        header_layout.addSpacing(20)
         
         # Fan selector buttons
         self.fan_button_group = QButtonGroup(self)
@@ -151,44 +189,84 @@ class FanCurveEditor(QWidget):
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         
-        self.preset_quiet_btn = QPushButton("Quiet Preset")
-        self.preset_balanced_btn = QPushButton("Balanced Preset")
-        self.preset_performance_btn = QPushButton("Performance Preset")
+        self.preset_silent_btn = QPushButton("Silent")
+        self.preset_quiet_btn = QPushButton("Quiet")
+        self.preset_balanced_btn = QPushButton("Balanced")
+        self.preset_conservative_btn = QPushButton("Conservative")
+        self.preset_performance_btn = QPushButton("Performance")
+        self.preset_max_btn = QPushButton("Max Fan")
         self.reset_btn = QPushButton("Reset")
         self.apply_btn = QPushButton("Apply")
         
-        for btn in [self.preset_quiet_btn, self.preset_balanced_btn, self.preset_performance_btn, self.reset_btn, self.apply_btn]:
+        preset_buttons = [
+            self.preset_silent_btn, self.preset_quiet_btn, self.preset_balanced_btn,
+            self.preset_conservative_btn, self.preset_performance_btn, self.preset_max_btn,
+            self.reset_btn, self.apply_btn
+        ]
+        
+        for btn in preset_buttons:
             btn.setStyleSheet("""
                 QPushButton {
-                    padding: 10px 20px;
+                    padding: 8px 16px;
                     border-radius: 6px;
                     font-weight: 500;
+                    font-size: 11pt;
                 }
                 QPushButton:hover {
                     opacity: 0.9;
                 }
             """)
         
+        self.preset_silent_btn.setStyleSheet(self.preset_silent_btn.styleSheet() + "background-color: #E0E0E0; color: #333;")
         self.preset_quiet_btn.setStyleSheet(self.preset_quiet_btn.styleSheet() + "background-color: #9E9E9E; color: white;")
         self.preset_balanced_btn.setStyleSheet(self.preset_balanced_btn.styleSheet() + "background-color: #4CAF50; color: white;")
+        self.preset_conservative_btn.setStyleSheet(self.preset_conservative_btn.styleSheet() + "background-color: #FF9800; color: white;")
         self.preset_performance_btn.setStyleSheet(self.preset_performance_btn.styleSheet() + "background-color: #F44336; color: white;")
+        self.preset_max_btn.setStyleSheet(self.preset_max_btn.styleSheet() + "background-color: #9C27B0; color: white;")
         self.reset_btn.setStyleSheet(self.reset_btn.styleSheet() + "background-color: #666; color: white;")
         self.apply_btn.setStyleSheet(self.apply_btn.styleSheet() + "background-color: #2196F3; color: white;")
         
+        button_layout.addWidget(self.preset_silent_btn)
         button_layout.addWidget(self.preset_quiet_btn)
         button_layout.addWidget(self.preset_balanced_btn)
+        button_layout.addWidget(self.preset_conservative_btn)
         button_layout.addWidget(self.preset_performance_btn)
+        button_layout.addWidget(self.preset_max_btn)
         button_layout.addWidget(self.reset_btn)
         button_layout.addWidget(self.apply_btn)
         
         layout.addLayout(button_layout)
         
         # Connect signals
+        self.preset_silent_btn.clicked.connect(lambda: self.load_preset('silent'))
         self.preset_quiet_btn.clicked.connect(lambda: self.load_preset('quiet'))
         self.preset_balanced_btn.clicked.connect(lambda: self.load_preset('balanced'))
+        self.preset_conservative_btn.clicked.connect(lambda: self.load_preset('conservative'))
         self.preset_performance_btn.clicked.connect(lambda: self.load_preset('performance'))
+        self.preset_max_btn.clicked.connect(lambda: self.load_preset('max'))
         self.reset_btn.clicked.connect(self.reset_curve)
         self.apply_btn.clicked.connect(self.apply_curve)
+        
+        # Save Profile button
+        self.save_profile_btn = QPushButton("💾 Save Profile")
+        self.save_profile_btn.setStyleSheet("""
+            QPushButton {
+                padding: 10px 20px;
+                border-radius: 6px;
+                border: none;
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
+        """)
+        self.save_profile_btn.clicked.connect(self.save_current_profile)
+        button_layout.addWidget(self.save_profile_btn)
         
         # Set up initial curve
         self.load_preset('balanced')
@@ -264,13 +342,31 @@ class FanCurveEditor(QWidget):
         update_point_btn.clicked.connect(self.update_point_from_inputs)
         layout.addWidget(update_point_btn)
         
+        # Test Fan button
+        self.test_fan_btn = QPushButton("Test Fan (100% for 5s)")
+        self.test_fan_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF5722;
+                color: white;
+                padding: 10px;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+            QPushButton:disabled {
+                background-color: #ccc;
+                color: #666;
+            }
+        """)
+        self.test_fan_btn.clicked.connect(self.test_fan)
+        layout.addWidget(self.test_fan_btn)
+        
         layout.addStretch()
         
         return panel
     
     def update_point_from_inputs(self):
         """Update the selected point from input fields."""
-        if self.selected_point is None:
+        if self.selected_point_temp is None:
             QMessageBox.information(self, "No Selection", "Please select a point to update.")
             return
         
@@ -279,16 +375,13 @@ class FanCurveEditor(QWidget):
         
         if self.current_curve:
             try:
-                # Get old point
-                old_point = self.current_curve.points[self.selected_point]
-                
-                # Remove old point
-                self.current_curve.remove_point(old_point.temperature)
+                # Remove old point by temperature
+                self.current_curve.remove_point(self.selected_point_temp)
                 
                 # Add new point
                 self.current_curve.add_point(temp, speed)
                 
-                self.selected_point = None
+                self.selected_point_temp = None
                 self.update_display()
             except (IndexError, ValueError) as e:
                 QMessageBox.warning(self, "Invalid Curve", str(e))
@@ -297,6 +390,9 @@ class FanCurveEditor(QWidget):
         """Load a fan curve into the editor."""
         self.original_curve = curve
         self.current_curve = FanCurve([FanCurvePoint(p.temperature, p.fan_speed) for p in curve.points])
+        # Clear profile dropdown selection when loading manually (only if not blocked)
+        if hasattr(self, 'profile_dropdown') and not self.profile_dropdown.signalsBlocked():
+            self.profile_dropdown.setCurrentIndex(0)
         self.update_display()
     
     def load_preset(self, preset_name: str):
@@ -304,6 +400,116 @@ class FanCurveEditor(QWidget):
         from ..control.asusctl_interface import get_preset_curve
         preset = get_preset_curve(preset_name)
         self.load_curve(preset)
+    
+    def refresh_profile_dropdown(self):
+        """Refresh the profile dropdown with saved profiles."""
+        if not hasattr(self, 'profile_dropdown'):
+            return
+        
+        current_selection = self.profile_dropdown.currentText()
+        self.profile_dropdown.clear()
+        self.profile_dropdown.addItem("-- Select Profile --")
+        
+        # Load all profiles
+        self.profile_manager.load_all_profiles()
+        profiles = self.profile_manager.list_profiles()
+        for profile_name in profiles:
+            self.profile_dropdown.addItem(profile_name)
+        
+        # Restore selection if it still exists
+        if current_selection and current_selection != "-- Select Profile --":
+            index = self.profile_dropdown.findText(current_selection)
+            if index >= 0:
+                self.profile_dropdown.setCurrentIndex(index)
+    
+    def on_profile_dropdown_changed(self, profile_name: str):
+        """Handle profile selection from dropdown."""
+        if profile_name == "-- Select Profile --" or not profile_name:
+            return
+        
+        profile = self.profile_manager.get_profile(profile_name)
+        if not profile:
+            return
+        
+        # Load the appropriate curve based on selected fan
+        fan_name = self.get_current_fan_name()
+        if fan_name == "CPU" and profile.cpu_fan_curve:
+            # Temporarily disconnect to avoid clearing dropdown
+            self.profile_dropdown.blockSignals(True)
+            self.load_curve(profile.cpu_fan_curve)
+            self.profile_dropdown.blockSignals(False)
+        elif fan_name == "GPU" and profile.gpu_fan_curve:
+            self.profile_dropdown.blockSignals(True)
+            self.load_curve(profile.gpu_fan_curve)
+            self.profile_dropdown.blockSignals(False)
+        elif profile.cpu_fan_curve:
+            # Fallback to CPU curve if GPU not available
+            self.profile_dropdown.blockSignals(True)
+            self.load_curve(profile.cpu_fan_curve)
+            self.profile_dropdown.blockSignals(False)
+    
+    def save_current_profile(self):
+        """Save the current fan curves as a profile."""
+        if not self.current_curve:
+            QMessageBox.warning(
+                self,
+                "No Curve",
+                "Please configure a fan curve first."
+            )
+            return
+        
+        # Import ProfileDialog
+        from .profile_manager_tab import ProfileDialog
+        from PyQt6.QtWidgets import QDialog
+        
+        dialog = ProfileDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            name = dialog.get_name()
+            if not name:
+                QMessageBox.warning(self, "Invalid Name", "Profile name cannot be empty.")
+                return
+            
+            # Check if profile exists
+            if name in self.profile_manager.list_profiles():
+                reply = QMessageBox.question(
+                    self,
+                    "Overwrite?",
+                    f"Profile '{name}' already exists. Overwrite?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            
+            # Get curves for current fan
+            fan_name = self.get_current_fan_name()
+            cpu_curve = self.current_curve if fan_name == "CPU" else None
+            gpu_curve = self.current_curve if fan_name == "GPU" else None
+            
+            # If saving for one fan, try to preserve the other fan's curve from existing profile
+            existing_profile = self.profile_manager.get_profile(name)
+            if existing_profile:
+                if fan_name == "CPU" and existing_profile.gpu_fan_curve:
+                    gpu_curve = existing_profile.gpu_fan_curve
+                elif fan_name == "GPU" and existing_profile.cpu_fan_curve:
+                    cpu_curve = existing_profile.cpu_fan_curve
+            
+            profile = SavedProfile(
+                name=name,
+                description=dialog.get_description(),
+                cpu_fan_curve=cpu_curve,
+                gpu_fan_curve=gpu_curve
+            )
+            
+            if self.profile_manager.save_profile(profile):
+                QMessageBox.information(self, "Saved", f"Profile '{name}' saved successfully!")
+                self.refresh_profile_dropdown()
+                # Select the newly saved profile in dropdown
+                index = self.profile_dropdown.findText(name)
+                if index >= 0:
+                    self.profile_dropdown.setCurrentIndex(index)
+            else:
+                QMessageBox.warning(self, "Error", "Failed to save profile.")
     
     def update_display(self):
         """Update the graph display."""
@@ -316,7 +522,7 @@ class FanCurveEditor(QWidget):
                 scatter = item[0]
                 self.plot_item.removeItem(scatter)
         self.control_points.clear()
-        self.selected_point = None
+        self.selected_point_temp = None
         
         # Plot the curve
         temps = [p.temperature for p in self.current_curve.points]
@@ -357,7 +563,7 @@ class FanCurveEditor(QWidget):
             scatter, point, idx = self.control_points[index]
             self.temp_input.setValue(point.temperature)
             self.speed_input.setValue(point.fan_speed)
-            self.selected_point = idx
+            self.selected_point_temp = point.temperature  # Track by temperature
     
     def add_point_from_inputs(self):
         """Add or update a point from the input fields."""
@@ -367,20 +573,14 @@ class FanCurveEditor(QWidget):
         if self.current_curve:
             try:
                 # If a point is selected and has the same temperature, update it
-                if self.selected_point is not None:
-                    old_point = self.current_curve.points[self.selected_point]
-                    if old_point.temperature == temp:
-                        # Update existing point
-                        self.current_curve.remove_point(temp)
-                        self.current_curve.add_point(temp, speed)
-                        self.selected_point = None
-                    else:
-                        # Different temperature, add as new point
-                        self.current_curve.add_point(temp, speed)
-                        self.selected_point = None
-                else:
-                    # Add new point
+                if self.selected_point_temp is not None and self.selected_point_temp == temp:
+                    # Update existing point (remove will happen in add_point)
                     self.current_curve.add_point(temp, speed)
+                    self.selected_point_temp = None
+                else:
+                    # Add new point (or update if same temp)
+                    self.current_curve.add_point(temp, speed)
+                    self.selected_point_temp = None
                 
                 self.update_display()
             except ValueError as e:
@@ -388,12 +588,11 @@ class FanCurveEditor(QWidget):
     
     def remove_selected_point(self):
         """Remove the selected point."""
-        if self.selected_point is not None and self.current_curve:
+        if self.selected_point_temp is not None and self.current_curve:
             try:
-                # Get the point to remove
-                point_to_remove = self.current_curve.points[self.selected_point]
-                self.current_curve.remove_point(point_to_remove.temperature)
-                self.selected_point = None
+                # Remove point by temperature
+                self.current_curve.remove_point(self.selected_point_temp)
+                self.selected_point_temp = None
                 self.update_display()
             except (IndexError, ValueError) as e:
                 QMessageBox.warning(self, "Cannot Remove Point", str(e))
@@ -410,4 +609,165 @@ class FanCurveEditor(QWidget):
         if self.current_curve:
             self.curve_changed.emit(self.current_curve)
             QMessageBox.information(self, "Applied", "Fan curve has been applied!")
+    
+    def get_current_fan_name(self) -> str:
+        """Get the currently selected fan name."""
+        if self.cpu_fan_btn.isChecked():
+            return "CPU"
+        elif self.gpu_fan_btn.isChecked():
+            return "GPU"
+        return "CPU"
+    
+    def test_fan(self):
+        """Test fan by setting it to 100% for 5 seconds with countdown."""
+        if not self.asusctl.is_available():
+            QMessageBox.warning(
+                self,
+                "Not Available",
+                "asusctl is not available. Cannot test fan."
+            )
+            return
+        
+        fan_name = self.get_current_fan_name()
+        
+        # Confirm with user
+        reply = QMessageBox.question(
+            self,
+            "Test Fan",
+            f"This will set the {fan_name} fan to 100% for 5 seconds.\n\n"
+            "The fan will be very loud. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # Stop any existing timers
+        if self.test_restore_timer:
+            self.test_restore_timer.stop()
+        if self.test_countdown_timer:
+            self.test_countdown_timer.stop()
+        
+        # Disable button during test
+        self.test_fan_btn.setEnabled(False)
+        self.test_seconds_remaining = 5
+        
+        # Save original curve
+        if self.current_curve:
+            self.original_curve_before_test = FanCurve([
+                FanCurvePoint(p.temperature, p.fan_speed) 
+                for p in self.current_curve.points
+            ])
+        
+        # Create max curve for testing
+        max_curve = FanCurve([
+            FanCurvePoint(30, 100),
+            FanCurvePoint(50, 100),
+            FanCurvePoint(70, 100),
+            FanCurvePoint(85, 100),
+        ])
+        
+        # Get current profile
+        current_profile = self.asusctl.get_current_profile() or Profile.BALANCED
+        
+        # Apply max curve
+        success, message = self.asusctl.set_fan_curve(current_profile, fan_name, max_curve)
+        
+        if not success:
+            QMessageBox.warning(self, "Test Failed", f"Failed to test fan:\n{message}")
+            self.test_fan_btn.setEnabled(True)
+            self.test_fan_btn.setText("Test Fan (100% for 5s)")
+            return
+        
+        # Update button text to show starting
+        self.test_fan_btn.setText(f"⏳ Setting {fan_name} fan to 100%...")
+        
+        # Give a moment for the button update to show
+        from PyQt6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+        
+        # Start countdown timer (updates every second) - must be singleShot=False for repeating
+        self.test_countdown_timer = QTimer(self)
+        self.test_countdown_timer.timeout.connect(self.update_test_countdown)
+        self.test_countdown_timer.start(1000)  # Update every second
+        
+        # Set timer to restore after 5 seconds
+        self.test_restore_timer = QTimer(self)
+        self.test_restore_timer.setSingleShot(True)
+        self.test_restore_timer.timeout.connect(lambda: self.restore_after_test(fan_name, current_profile))
+        self.test_restore_timer.start(5000)  # 5 seconds
+        
+        # Initial countdown update - show immediately
+        self.update_test_countdown()
+        
+        # Show info dialog - but use show() instead of exec() so it's non-blocking
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Information)
+        msg_box.setWindowTitle("Test Started")
+        msg_box.setText(f"✅ {fan_name} fan set to 100%.\n\nWatch the button for countdown.")
+        msg_box.show()
+        # Auto-close after 2 seconds
+        QTimer.singleShot(2000, msg_box.close)
+    
+    def update_test_countdown(self):
+        """Update the countdown display during fan test."""
+        if not hasattr(self, 'test_seconds_remaining') or not hasattr(self, 'test_fan_name'):
+            return
+        
+        if self.test_seconds_remaining > 0:
+            self.test_fan_btn.setText(
+                f"⏱️ Testing {self.test_fan_name} Fan: {self.test_seconds_remaining}s remaining (100% speed)"
+            )
+            self.test_seconds_remaining -= 1
+        elif self.test_seconds_remaining == 0:
+            self.test_fan_btn.setText(f"⏳ Restoring {self.test_fan_name} Fan to previous settings...")
+            # Stop countdown timer
+            if self.test_countdown_timer:
+                self.test_countdown_timer.stop()
+    
+    def restore_after_test(self, fan_name: str, profile: Profile):
+        """Restore fan curve after test."""
+        # Stop countdown timer
+        if self.test_countdown_timer:
+            self.test_countdown_timer.stop()
+        
+        # Update button to show restoring
+        self.test_fan_btn.setText(f"Restoring {fan_name} Fan to previous settings...")
+        
+        # Restore original curve if available
+        if self.original_curve_before_test:
+            success, message = self.asusctl.set_fan_curve(profile, fan_name, self.original_curve_before_test)
+            if success:
+                # Reload curve in editor
+                self.load_curve(self.original_curve_before_test)
+                
+                # Show success message
+                QMessageBox.information(
+                    self,
+                    "Test Complete",
+                    f"✅ {fan_name} fan test completed successfully!\n\n"
+                    "Fan has been restored to previous settings."
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Restore Warning",
+                    f"Test complete, but failed to restore original curve:\n{message}\n\n"
+                    "Please manually restore your fan curve settings."
+                )
+        else:
+            QMessageBox.information(
+                self,
+                "Test Complete",
+                f"{fan_name} fan test completed.\n\n"
+                "Fan speed will return to normal based on temperature."
+            )
+        
+        # Re-enable button and reset text
+        self.test_fan_btn.setEnabled(True)
+        self.test_fan_btn.setText("Test Fan (100% for 5s)")
+        self.test_restore_timer = None
+        self.test_countdown_timer = None
+        self.test_seconds_remaining = 0
 

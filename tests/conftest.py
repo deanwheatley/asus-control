@@ -98,3 +98,53 @@ def qapp(qtbot):
     yield app
     app.quit()
 
+
+@pytest.fixture
+def mock_journalctl(monkeypatch):
+    """Mock journalctl subprocess calls for log monitoring tests."""
+    import json
+    from unittest.mock import Mock
+    
+    def _mock_run(*args, **kwargs):
+        result = Mock()
+        result.returncode = 0
+        result.stdout = ""
+        result.stderr = ""
+        result.timeout = False
+        
+        # Return empty by default, tests can override
+        return result
+    
+    monkeypatch.setattr("subprocess.run", _mock_run)
+    return _mock_run
+
+
+@pytest.fixture
+def sample_log_entries():
+    """Sample log entries for testing."""
+    from src.monitoring.log_monitor import LogEntry
+    
+    entries = [
+        LogEntry({
+            '__REALTIME_TIMESTAMP': '1703520000000000',
+            'PRIORITY': '3',
+            'MESSAGE': 'Error message',
+            '_SYSTEMD_UNIT': 'test.service'
+        }),
+        LogEntry({
+            '__REALTIME_TIMESTAMP': '1703520001000000',
+            'PRIORITY': '6',
+            'MESSAGE': 'Info message',
+            '_SYSTEMD_UNIT': 'test.service'
+        }),
+        LogEntry({
+            '__REALTIME_TIMESTAMP': '1703520002000000',
+            'PRIORITY': '4',
+            'MESSAGE': 'Warning message',
+            '_SYSTEMD_UNIT': 'other.service'
+        })
+    ]
+    
+    return entries
+
+

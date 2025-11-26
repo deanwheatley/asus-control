@@ -245,3 +245,4 @@ class TestProfileManager:
         assert profile.name == "Imported Profile"
         assert "Imported Profile" in manager.list_profiles()
 
+

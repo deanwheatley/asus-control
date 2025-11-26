@@ -1,10 +1,30 @@
 #!/bin/bash
-# ASUS Fan Control Launcher
+# Daemon Breathalyzer Launcher
 # Automatically handles virtual environment and launches the application
 
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
+
+# Log file for debugging
+LOG_FILE="$HOME/.local/share/asus-control/launcher.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+
+# Function to show error dialog
+show_error() {
+    local message="$1"
+    echo "$(date): ERROR: $message" >> "$LOG_FILE"
+    
+    if command -v zenity > /dev/null 2>&1; then
+        zenity --error --text="$message" --title="Daemon Breathalyzer Error" 2>/dev/null &
+    elif command -v kdialog > /dev/null 2>&1; then
+        kdialog --error "$message" --title "Daemon Breathalyzer Error" 2>/dev/null &
+    else
+        # Fallback: try to show in terminal if available
+        echo "ERROR: $message" >&2
+        echo "Check log file: $LOG_FILE" >&2
+    fi
+}
 
 # Check if virtual environment exists
 if [ ! -d "venv" ]; then
@@ -59,11 +79,26 @@ if ! python3 -c "import PyQt6" 2>/dev/null; then
     fi
 fi
 
-# Run the application
-python3 run.py
+# Run the application with error handling
+echo "$(date): Starting Daemon Breathalyzer..." >> "$LOG_FILE"
+python3 run.py >> "$LOG_FILE" 2>&1
 
 # Capture exit code
 EXIT_CODE=$?
+
+# Check if application failed
+if [ $EXIT_CODE -ne 0 ]; then
+    ERROR_MSG="Application failed to start (exit code: $EXIT_CODE).\n\n"
+    ERROR_MSG+="Check the log file for details:\n$LOG_FILE\n\n"
+    
+    # Try to extract specific error from log
+    if grep -q "xcb-cursor0\|libxcb-cursor0\|Qt platform plugin" "$LOG_FILE" 2>/dev/null; then
+        ERROR_MSG+="Qt platform plugin error detected.\n"
+        ERROR_MSG+="Please install: sudo apt install libxcb-cursor0"
+    fi
+    
+    show_error "$ERROR_MSG"
+fi
 
 # Deactivate virtual environment
 deactivate

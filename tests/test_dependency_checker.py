@@ -194,3 +194,4 @@ class TestDependencyChecker:
         assert 'all_installed' in results
         assert 'required_installed' in results
 
+
